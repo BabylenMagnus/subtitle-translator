@@ -3,7 +3,9 @@ from langchain_ollama import OllamaLLM
 from langchain_groq import ChatGroq
 from langchain_core.rate_limiters import InMemoryRateLimiter
 import time
-from utils import load_prompt
+from utils import load_prompt, extract_think_and_response
+from tqdm import tqdm
+import re
 
 
 class BasePromptService:
@@ -27,10 +29,10 @@ class BasePromptService:
     def _invoke_llm(self, formatted_prompt: str) -> str:
         try:
             response = self.llm.invoke(formatted_prompt)
+            _, response = extract_think_and_response(response)
             return response
         except Exception as e:
             if "429" in str(e) or "rate limit" in str(e).lower():
-                print("Rate limit hit, retrying after delay...")
                 time.sleep(2)
                 return self._invoke_llm(formatted_prompt)
             raise
@@ -50,33 +52,48 @@ class SubtitleTranslator(BasePromptService):
         context_subs = subtitles[start_idx:current_idx]
         return "\n".join(sub["text"] for sub in context_subs)
 
-    def translate_subtitles(self, subtitles: List[Dict], target_lang: str) -> List[Dict]:
+    def translate_subtitles(self, subtitles: List[Dict], target_lang: str, source_lang: str = "English", test: bool = False) -> List[Dict]:
         """
         Translate subtitle entries while maintaining timing and structure.
         
         Args:
             subtitles: List of subtitle dictionaries with index, timestamp, text
             target_lang: Target language for translation
+            source_lang: Source language of subtitles (default: English)
+            test: If True, only translate first 20 lines (default: False)
             
         Returns:
             List of translated subtitle dictionaries
         """
-        translated_subs = []
+        if test:
+            subtitles = subtitles[:20]
 
-        for i, subtitle in enumerate(subtitles):
+        translated_subs = []
+        pbar = tqdm(subtitles, desc="Translating")
+
+        for i, subtitle in enumerate(pbar):
+            text = subtitle["text"]
+            
+            # Skip empty subtitles
+            if not text.strip():
+                translated_subs.append(subtitle.copy())
+                continue
+
             context = self._get_context(subtitles, i)
 
             formatted_prompt = self.prompt.format(
-                context=context, current_line=subtitle["text"]
+                context=context,
+                current_line=text,
+                source_lang=source_lang,
+                target_lang=target_lang
             )
 
             translated_text = self._invoke_llm(formatted_prompt)
 
-            translated_subs.append(
-                {"index": subtitle["index"], "timestamp": subtitle["timestamp"], "text": translated_text.strip()}
-            )
-
-            if i % 10 == 0:  # Progress indicator
-                print(f"Translated {i}/{len(subtitles)} lines")
+            translated_subs.append({
+                "index": subtitle["index"],
+                "timestamp": subtitle["timestamp"],
+                "text": translated_text.strip()
+            })
 
         return translated_subs

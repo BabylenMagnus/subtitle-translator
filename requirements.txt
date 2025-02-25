@@ -1,3 +1,4 @@
+chardet
 langchain-core
 langchain-groq
 langchain-ollama

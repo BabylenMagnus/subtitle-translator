@@ -1,6 +1,7 @@
 from srt_translator import SubtitleTranslator
 import re
 from typing import List, Dict
+import chardet
 
 
 def parse_srt_file(file_path: str) -> List[Dict]:
@@ -13,7 +14,12 @@ def parse_srt_file(file_path: str) -> List[Dict]:
     Returns:
         List of dictionaries with index, timestamp, and text
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, 'rb') as f:
+        raw_data = f.read()
+        detected = chardet.detect(raw_data)
+        encoding = detected['encoding']
+
+    with open(file_path, 'r', encoding=encoding or 'utf-8') as f:
         content = f.read()
 
     # Split into subtitle blocks
@@ -49,16 +55,17 @@ def save_srt_file(subtitles: List[Dict], output_path: str) -> None:
         subtitles: List of subtitle dictionaries with index, timestamp, text
         output_path: Path where to save the SRT file
     """
-    with open(output_path, 'w', encoding='utf-8') as f:
-        for i, subtitle in enumerate(subtitles, 1):
+    with open(output_path, 'w', encoding='utf-8', errors='replace') as f:
+        for subtitle in subtitles:
             # Write index
             f.write(f"{subtitle['index']}\n")
             
             # Write timestamp
             f.write(f"{subtitle['timestamp']}\n")
             
-            # Write text
-            f.write(f"{subtitle['text']}\n")
+            # Write text, ensure it's valid UTF-8
+            text = subtitle['text'].encode('utf-8', errors='replace').decode('utf-8')
+            f.write(f"{text}\n")
             
             # Write blank line between subtitles
             f.write('\n')
@@ -73,9 +80,9 @@ def get_plain_text(file_path):
     return '\n'.join(sub['text'] for sub in subtitles)
 
 
-def translate_srt(file_path: str, target_lang: str, output_path: str):
+def _translate_srt(file_path: str, target_lang: str, output_path: str):
     """
-    Translate an SRT file to target language and save to new file.
+    Internal function to translate an SRT file to target language and save to new file.
     
     Args:
         file_path: Path to source SRT file
@@ -97,21 +104,3 @@ def translate_srt(file_path: str, target_lang: str, output_path: str):
 
     # Write translated SRT file
     save_srt_file(translated_subs, output_path)
-
-
-if __name__ == '__main__':
-    import sys
-
-    if len(sys.argv) != 4:
-        print("Usage: python srt_parser.py <input_srt> <target_lang> <output_srt>")
-        sys.exit(1)
-
-    input_file = sys.argv[1]
-    target_lang = sys.argv[2]
-    output_file = sys.argv[3]
-
-    try:
-        translate_srt(input_file, target_lang, output_file)
-        print(f"Successfully translated to {output_file}")
-    except Exception as e:
-        print(f"Error processing file: {e}")
